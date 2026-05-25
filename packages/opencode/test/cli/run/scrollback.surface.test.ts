@@ -317,6 +317,37 @@ test("renders todo and question summaries without boilerplate footer copy", asyn
         },
       }),
     },
+    {
+      title: "# Todos",
+      include: ["[•] Recover persisted todo state", "[ ] Continue after compaction"],
+      exclude: ["Reading todos", "todos completed"],
+      start: toolCommit({
+        tool: "todoread",
+        phase: "start",
+        toolState: "running",
+        state: {
+          status: "running",
+          input: {},
+          time: { start: 1 },
+        },
+      }),
+      final: toolCommit({
+        tool: "todoread",
+        phase: "final",
+        toolState: "completed",
+        state: {
+          status: "completed",
+          input: {},
+          metadata: {
+            todos: [
+              { status: "in_progress", content: "Recover persisted todo state" },
+              { status: "pending", content: "Continue after compaction" },
+            ],
+          },
+          time: { start: 1, end: 4 },
+        },
+      }),
+    },
   ]
 
   for (const item of cases) {

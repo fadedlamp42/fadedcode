@@ -490,8 +490,8 @@ function AssistantTool(props: { part: SessionMessageAssistantTool; sessionID: st
       <Match when={props.part.name === "apply_patch"}>
         <ApplyPatch {...toolprops} />
       </Match>
-      <Match when={props.part.name === "todowrite"}>
-        <TodoWrite {...toolprops} />
+      <Match when={props.part.name === "todowrite" || props.part.name === "todoread"}>
+        <TodoTool {...toolprops} />
       </Match>
       <Match when={props.part.name === "question"}>
         <Question {...toolprops} />
@@ -959,9 +959,12 @@ function ApplyPatch(props: ToolProps) {
   )
 }
 
-function TodoWrite(props: ToolProps) {
+function TodoTool(props: ToolProps) {
   const { theme } = useTheme()
-  const todos = createMemo(() => arrayValue(props.input.todos).flatMap((item) => (isRecord(item) ? [item] : [])))
+  const todos = createMemo(() =>
+    arrayValue(props.metadata.todos ?? props.input.todos).flatMap((item) => (isRecord(item) ? [item] : [])),
+  )
+  const pending = createMemo(() => (props.part.name === "todoread" ? "Reading todos..." : "Updating todos..."))
   return (
     <Switch>
       <Match when={todos().length > 0 && props.part.state.status === "completed"}>
@@ -978,8 +981,8 @@ function TodoWrite(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="⚙" pending="Updating todos..." complete={false} part={props.part}>
-          Updating todos...
+        <InlineTool icon="⚙" pending={pending()} complete={false} part={props.part}>
+          {pending()}
         </InlineTool>
       </Match>
     </Switch>

@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
+import DESCRIPTION_READ from "./todoread.txt"
 import DESCRIPTION_WRITE from "./todowrite.txt"
 import { Todo } from "../session/todo"
 
@@ -18,8 +19,20 @@ export const Parameters = Schema.Struct({
   todos: Schema.mutable(Schema.Array(TodoItem)).annotate({ description: "The updated todo list" }),
 })
 
+export const ReadParameters = Schema.Struct({})
+
 type Metadata = {
   todos: Todo.Info[]
+}
+
+function result(todos: Todo.Info[]) {
+  return {
+    title: `${todos.filter((item) => item.status !== "completed").length} todos`,
+    output: JSON.stringify(todos, null, 2),
+    metadata: {
+      todos,
+    },
+  }
 }
 
 export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Service>(
@@ -44,14 +57,31 @@ export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Servi
             todos: params.todos,
           })
 
-          return {
-            title: `${params.todos.filter((x) => x.status !== "completed").length} todos`,
-            output: JSON.stringify(params.todos, null, 2),
-            metadata: {
-              todos: params.todos,
-            },
-          }
+          return result(params.todos)
         }),
     } satisfies Tool.DefWithoutID<typeof Parameters, Metadata>
+  }),
+)
+
+export const TodoReadTool = Tool.define<typeof ReadParameters, Metadata, Todo.Service>(
+  "todoread",
+  Effect.gen(function* () {
+    const todo = yield* Todo.Service
+
+    return {
+      description: DESCRIPTION_READ,
+      parameters: ReadParameters,
+      execute: (_params: Schema.Schema.Type<typeof ReadParameters>, ctx: Tool.Context<Metadata>) =>
+        Effect.gen(function* () {
+          yield* ctx.ask({
+            permission: "todoread",
+            patterns: ["*"],
+            always: ["*"],
+            metadata: {},
+          })
+
+          return result(yield* todo.get(ctx.sessionID))
+        }),
+    } satisfies Tool.DefWithoutID<typeof ReadParameters, Metadata>
   }),
 )

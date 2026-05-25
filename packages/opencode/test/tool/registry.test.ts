@@ -136,6 +136,8 @@ describe("tool.registry", () => {
       const registry = yield* ToolRegistry.Service
       const ids = yield* registry.ids()
 
+      expect(ids).toContain("todoread")
+      expect(ids).toContain("todowrite")
       expect(ids).not.toContain("task_status")
     }),
   )

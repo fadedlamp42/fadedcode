@@ -1,0 +1,5 @@
+Use this tool to read the current todo list for the session.
+
+Use it proactively when you need to recover task state that may no longer be in the immediate conversation context, especially after compaction, interruption, or long tool-heavy turns.
+
+This tool takes no parameters and returns the current todo items with their status, priority, and content. If no todos exist yet, it returns an empty list.

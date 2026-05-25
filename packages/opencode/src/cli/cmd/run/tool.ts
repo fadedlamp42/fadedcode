@@ -29,7 +29,7 @@ import type { QuestionTool } from "@/tool/question"
 import type { ReadTool } from "@/tool/read"
 import type { SkillTool } from "@/tool/skill"
 import type { TaskTool } from "@/tool/task"
-import type { TodoWriteTool } from "@/tool/todo"
+import type { TodoReadTool, TodoWriteTool } from "@/tool/todo"
 import type { WebFetchTool } from "@/tool/webfetch"
 import { webSearchProviderLabel, type WebSearchTool } from "@/tool/websearch"
 import type { WriteTool } from "@/tool/write"
@@ -99,6 +99,7 @@ type ToolDefs = {
   apply_patch: typeof ApplyPatchTool
   batch: Tool.Info
   task: typeof TaskTool
+  todoread: typeof TodoReadTool
   todowrite: typeof TodoWriteTool
   question: typeof QuestionTool
   read: typeof ReadTool
@@ -374,20 +375,31 @@ function runTask(p: ToolProps<typeof TaskTool>): ToolInline {
   }
 }
 
-function runTodo(p: ToolProps<typeof TodoWriteTool>): ToolInline {
+function todoItems(frame: ToolFrame) {
+  return list<{ status?: string; content?: string }>(frame.meta.todos ?? frame.input.todos).flatMap((item) => {
+    const content = typeof item?.content === "string" ? item.content : ""
+    if (!content) {
+      return []
+    }
+
+    return [
+      {
+        status: typeof item.status === "string" ? item.status : "",
+        content,
+      },
+    ]
+  })
+}
+
+function runTodo(p: ToolProps): ToolInline {
   return {
     icon: "#",
     title: "Todos",
     mode: "block",
-    body: list<{ status?: string; content?: string }>(p.frame.input.todos)
-      .flatMap((item) => {
-        const body = typeof item?.content === "string" ? item.content : ""
-        if (!body) {
-          return []
-        }
-
+    body: todoItems(p.frame)
+      .map((item) => {
         const mark = item.status === "completed" ? "[✓]" : item.status === "in_progress" ? "[•]" : "[ ]"
-        return [`${mark} ${body}`]
+        return `${mark} ${item.content}`
       })
       .join("\n"),
   }
@@ -582,24 +594,10 @@ function snapTask(p: ToolProps<typeof TaskTool>): ToolSnapshot {
   }
 }
 
-function snapTodo(p: ToolProps<typeof TodoWriteTool>): ToolSnapshot {
-  const items = list<{ status?: string; content?: string }>(p.frame.input.todos).flatMap((item) => {
-    const content = typeof item?.content === "string" ? item.content : ""
-    if (!content) {
-      return []
-    }
-
-    return [
-      {
-        status: typeof item.status === "string" ? item.status : "",
-        content,
-      },
-    ]
-  })
-
+function snapTodo(p: ToolProps): ToolSnapshot {
   return {
     kind: "todo",
-    items,
+    items: todoItems(p.frame),
     tail: "",
   }
 }
@@ -790,12 +788,12 @@ function scrollTaskFinal(p: ToolProps<typeof TaskTool>): string {
   return `# ${kind} Task\n${row}`
 }
 
-function scrollTodoStart(_: ToolProps<typeof TodoWriteTool>): string {
+function scrollTodoStart(_: ToolProps): string {
   return ""
 }
 
-function scrollTodoFinal(p: ToolProps<typeof TodoWriteTool>): string {
-  const items = list<{ status?: string }>(p.input.todos)
+function scrollTodoFinal(p: ToolProps): string {
+  const items = todoItems(p.frame)
   const time = span(p.frame.state)
   if (items.length === 0) {
     if (!time) {
@@ -1107,6 +1105,19 @@ const TOOL_RULES = {
       final: scrollTaskFinal,
     },
     permission: permTask,
+  },
+  todoread: {
+    view: {
+      output: false,
+      final: true,
+      snap: "structured",
+    },
+    run: runTodo,
+    snap: snapTodo,
+    scroll: {
+      start: scrollTodoStart,
+      final: scrollTodoFinal,
+    },
   },
   todowrite: {
     view: {

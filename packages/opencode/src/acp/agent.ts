@@ -346,7 +346,7 @@ export class Agent implements ACPAgent {
               const kind = toToolKind(part.tool)
               const content = completedToolContent(part, kind)
 
-              if (part.tool === "todowrite") {
+              if (part.tool === "todowrite" || part.tool === "todoread") {
                 const parsedTodos = decodeTodos(part.state.output)
                 if (Result.isSuccess(parsedTodos)) {
                   await this.connection
@@ -830,7 +830,7 @@ export class Agent implements ACPAgent {
             const kind = toToolKind(part.tool)
             const content = completedToolContent(part, kind)
 
-            if (part.tool === "todowrite") {
+            if (part.tool === "todowrite" || part.tool === "todoread") {
               const parsedTodos = decodeTodos(part.state.output)
               if (Result.isSuccess(parsedTodos)) {
                 await this.connection

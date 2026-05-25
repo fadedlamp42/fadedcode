@@ -11,8 +11,8 @@ import type { Agent } from "./agent"
  *    silently bypass it. (#26514)
  * 2. The parent **session's** deny rules and external_directory rules —
  *    same forwarding the original code already did.
- * 3. Default `todowrite` and `task` denies if the subagent's own ruleset
- *    doesn't already permit them.
+ * 3. Default `todoread`, `todowrite`, and `task` denies if the subagent's
+ *    own ruleset doesn't already permit them.
  */
 export function deriveSubagentSessionPermission(input: {
   parentSessionPermission: Permission.Ruleset
@@ -20,6 +20,7 @@ export function deriveSubagentSessionPermission(input: {
   subagent: Agent.Info
 }): Permission.Ruleset {
   const canTask = input.subagent.permission.some((rule) => rule.permission === "task")
+  const canTodoRead = input.subagent.permission.some((rule) => rule.permission === "todoread")
   const canTodo = input.subagent.permission.some((rule) => rule.permission === "todowrite")
   const parentAgentDenies =
     input.parentAgent?.permission.filter((rule) => rule.action === "deny" && rule.permission === "edit") ?? []
@@ -28,6 +29,7 @@ export function deriveSubagentSessionPermission(input: {
     ...input.parentSessionPermission.filter(
       (rule) => rule.permission === "external_directory" || rule.action === "deny",
     ),
+    ...(canTodoRead ? [] : [{ permission: "todoread" as const, pattern: "*" as const, action: "deny" as const }]),
     ...(canTodo ? [] : [{ permission: "todowrite" as const, pattern: "*" as const, action: "deny" as const }]),
     ...(canTask ? [] : [{ permission: "task" as const, pattern: "*" as const, action: "deny" as const }]),
   ]

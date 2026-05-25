@@ -1664,8 +1664,8 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "apply_patch"}>
           <ApplyPatch {...toolprops} />
         </Match>
-        <Match when={props.part.tool === "todowrite"}>
-          <TodoWrite {...toolprops} />
+        <Match when={props.part.tool === "todowrite" || props.part.tool === "todoread"}>
+          <TodoTool {...toolprops} />
         </Match>
         <Match when={props.part.tool === "question"}>
           <Question {...toolprops} />
@@ -2239,21 +2239,23 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
   )
 }
 
-function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
+function TodoTool(props: ToolProps<typeof TodoWriteTool>) {
+  const todos = () => props.metadata.todos ?? props.input.todos ?? []
+  const pending = () => (props.tool === "todoread" ? "Reading todos..." : "Updating todos...")
   return (
     <Switch>
-      <Match when={props.metadata.todos?.length}>
+      <Match when={todos().length}>
         <BlockTool title="# Todos" part={props.part}>
           <box>
-            <For each={props.input.todos ?? []}>
+            <For each={todos()}>
               {(todo) => <TodoItem status={todo.status} content={todo.content} />}
             </For>
           </box>
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="⚙" pending="Updating todos..." complete={false} part={props.part}>
-          Updating todos...
+        <InlineTool icon="⚙" pending={pending()} complete={false} part={props.part}>
+          {pending()}
         </InlineTool>
       </Match>
     </Switch>
