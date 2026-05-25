@@ -1,3 +1,7 @@
+# preface
+
+See [this thread](https://github.com/anomalyco/opencode/issues/29118#issuecomment-4531080221) for the origin of this fork and how I feel about maintaining it (as of 05/24/2026).
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>
