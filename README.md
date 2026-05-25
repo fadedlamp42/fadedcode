@@ -2,6 +2,14 @@
 
 See [this thread](https://github.com/anomalyco/opencode/issues/29118#issuecomment-4531080221) for the origin of this fork and how I feel about maintaining it (as of 05/24/2026).
 
+Basically:
+1. `bun install`
+2. `./build.sh` to build the binary
+3. `./install.sh` (assumes you're on `darwin` and fine with a new `opencode` script in `/usr/local/bin`
+4. `brew uninstall opencode` or `npm uninstall -g opencode-ai` to avoid shadowing
+
+# upstream README.md below
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>
