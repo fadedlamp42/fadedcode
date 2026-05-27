@@ -1540,6 +1540,9 @@ export const layer = Layer.effect(
         const provider = s.providers[model.providerID]
         const options = { ...provider.options }
 
+        // preserve existing behavior: provider request timeouts are opt-in.
+        // (chunkTimeout is the safer default watchdog for streaming stalls.)
+
         if (
           model.providerID === "google-vertex" &&
           model.api.npm === "@ai-sdk/google-vertex/anthropic" &&

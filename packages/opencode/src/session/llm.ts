@@ -265,14 +265,110 @@ const live: Layer.Layer<
           "llm.model": input.model.id,
         }),
       )
+
+      const debugSse =
+        process.env.OPENCODE_LLM_DEBUG_SSE === "1" ||
+        process.env.OPENCODE_LLM_DEBUG_SSE === "true" ||
+        process.env.OPENCODE_LLM_DEBUG_SSE === "yes"
+
+      const lastChunk = { at: Date.now(), type: "(none)" }
+      const chunkCounts: Record<string, number> = {}
+
       // Default runtime path: AI SDK owns provider execution and tool dispatch;
       // LLMAISDK.toLLMEvents below normalizes fullStream parts for the processor.
       return {
         type: "ai-sdk" as const,
         result: streamText({
+          includeRawChunks: debugSse,
+          onChunk: debugSse
+            ? ({ chunk }) => {
+                const now = Date.now()
+                const idleMs = now - lastChunk.at
+                lastChunk.at = now
+                lastChunk.type = chunk.type
+                chunkCounts[chunk.type] = (chunkCounts[chunk.type] ?? 0) + 1
+
+                if (chunk.type !== "raw") return
+                const raw = chunk.rawValue
+                if (!raw || typeof raw !== "object" || !("type" in raw)) return
+
+                const rawType = (raw as Record<string, unknown>).type
+                if (typeof rawType !== "string") return
+
+                // Logging every delta would explode log volume; keep this focused on state transitions.
+                if (rawType.endsWith(".delta")) return
+                if (rawType.endsWith(".added")) return
+                if (rawType.endsWith(".done")) return
+
+                l.info("sse", {
+                  kind: "raw",
+                  type: rawType,
+                  idleMs,
+                  chunks: chunkCounts,
+                })
+              }
+            : undefined,
+          onAbort: debugSse
+            ? ({ steps }) => {
+                l.info("sse", {
+                  kind: "abort",
+                  steps: steps.length,
+                  lastChunkType: lastChunk.type,
+                  idleMs: Date.now() - lastChunk.at,
+                  chunks: chunkCounts,
+                })
+              }
+            : undefined,
+          experimental_onStepStart: debugSse
+            ? (event) => {
+                l.info("sse", {
+                  kind: "step-start",
+                  step: event.stepNumber,
+                  model: event.model,
+                  messages: event.messages.length,
+                  tools: event.tools ? Object.keys(event.tools).length : 0,
+                  activeTools: event.activeTools?.length,
+                })
+              }
+            : undefined,
+          onFinish: debugSse
+            ? ({ stepNumber, finishReason, rawFinishReason, totalUsage, steps }) => {
+                l.info("sse", {
+                  kind: "finish",
+                  step: stepNumber,
+                  finishReason,
+                  rawFinishReason,
+                  steps: steps.length,
+                  totalUsage,
+                  idleMs: Date.now() - lastChunk.at,
+                  lastChunkType: lastChunk.type,
+                  chunks: chunkCounts,
+                })
+              }
+            : undefined,
+          onStepFinish: debugSse
+            ? (stepResult) => {
+                l.info("sse", {
+                  kind: "step-finish",
+                  step: stepResult.stepNumber,
+                  finishReason: stepResult.finishReason,
+                  rawFinishReason: stepResult.rawFinishReason,
+                  idleMs: Date.now() - lastChunk.at,
+                  lastChunkType: lastChunk.type,
+                  chunks: chunkCounts,
+                })
+              }
+            : undefined,
           onError(error) {
             l.error("stream error", {
               error,
+              ...(debugSse
+                ? {
+                    idleMs: Date.now() - lastChunk.at,
+                    lastChunkType: lastChunk.type,
+                    chunks: chunkCounts,
+                  }
+                : {}),
             })
           },
           async experimental_repairToolCall(failed) {
