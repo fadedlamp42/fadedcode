@@ -18,6 +18,7 @@ import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import * as Bom from "@/util/bom"
+import { ToolJsonSchema } from "./json-schema"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -63,9 +64,18 @@ export const EditTool = Tool.define(
     const format = yield* Format.Service
     const bus = yield* Bus.Service
 
+    const jsonSchema = (() => {
+      const raw = ToolJsonSchema.fromSchema(Parameters)
+      if (typeof raw !== "object" || raw === null) return raw
+      const props = raw.properties ? { ...raw.properties } : undefined
+      if (props) delete (props as Record<string, unknown>).replaceAll
+      return { ...raw, properties: props }
+    })()
+
     return {
       description: DESCRIPTION,
       parameters: Parameters,
+      jsonSchema,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
           if (!params.filePath) {
@@ -74,6 +84,12 @@ export const EditTool = Tool.define(
 
           if (params.oldString === params.newString) {
             throw new Error("No changes to apply: oldString and newString are identical.")
+          }
+
+          if (params.replaceAll) {
+            throw new Error(
+              "replaceAll is deprecated. Use apply_patch for batch edits across a file, or omit replaceAll and provide more surrounding context in oldString to target a single occurrence.",
+            )
           }
 
           const instance = yield* InstanceState.context
@@ -126,7 +142,7 @@ export const EditTool = Tool.define(
               const old = convertToLineEnding(normalizeLineEndings(params.oldString), ending)
               const replacement = convertToLineEnding(normalizeLineEndings(params.newString), ending)
 
-              const next = Bom.split(replace(contentOld, old, replacement, params.replaceAll))
+              const next = Bom.split(replace(contentOld, old, replacement))
               const desiredBom = source.bom || next.bom
               contentNew = next.text
 
@@ -671,7 +687,7 @@ export function trimDiff(diff: string): string {
   return trimmedLines.join("\n")
 }
 
-export function replace(content: string, oldString: string, newString: string, replaceAll = false): string {
+export function replace(content: string, oldString: string, newString: string): string {
   if (oldString === newString) {
     throw new Error("No changes to apply: oldString and newString are identical.")
   }
@@ -693,9 +709,6 @@ export function replace(content: string, oldString: string, newString: string, r
       const index = content.indexOf(search)
       if (index === -1) continue
       notFound = false
-      if (replaceAll) {
-        return content.replaceAll(search, newString)
-      }
       const lastIndex = content.lastIndexOf(search)
       if (index !== lastIndex) continue
       return content.substring(0, index) + newString + content.substring(index + search.length)

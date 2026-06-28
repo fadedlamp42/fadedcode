@@ -210,15 +210,16 @@ describe("tool.edit", () => {
       }),
     )
 
-    it.instance("replaces all occurrences with replaceAll option", () =>
+    it.instance("fails with deprecation error when replaceAll is true", () =>
       Effect.gen(function* () {
         const test = yield* TestInstance
         const filepath = path.join(test.directory, "file.txt")
         yield* put(filepath, "foo bar foo baz foo")
 
-        yield* run({ filePath: filepath, oldString: "foo", newString: "qux", replaceAll: true })
-
-        expect(yield* load(filepath)).toBe("qux bar qux baz qux")
+        const error = yield* fail({ filePath: filepath, oldString: "foo", newString: "qux", replaceAll: true })
+        expect(error.message).toContain("replaceAll is deprecated")
+        expect(error.message).toContain("apply_patch")
+        expect(yield* load(filepath)).toBe("foo bar foo baz foo")
       }),
     )
 
@@ -331,7 +332,6 @@ describe("tool.edit", () => {
       content: string
       oldString: string
       newString: string
-      replaceAll?: boolean
     }
 
     const apply = Effect.fn("EditToolTest.lineEndings.apply")(function* (input: Input) {
@@ -342,7 +342,6 @@ describe("tool.edit", () => {
         filePath,
         oldString: input.oldString,
         newString: input.newString,
-        replaceAll: input.replaceAll,
       })
       return yield* load(filePath)
     })
@@ -451,35 +450,21 @@ describe("tool.edit", () => {
       }),
     )
 
-    it.instance("replaceAll preserves LF for multi-line blocks", () =>
+    it.instance("errors on duplicate content since replaceAll is deprecated", () =>
       Effect.gen(function* () {
+        const test = yield* TestInstance
         const blockOld = "alpha\nbeta"
         const blockNew = "alpha\nbeta-updated"
         const content = normalize(blockOld + "\n" + blockOld + "\n", "\n")
-        const output = yield* apply({
-          content,
+        const filepath = path.join(test.directory, "file.txt")
+        yield* put(filepath, content)
+
+        const error = yield* fail({
+          filePath: filepath,
           oldString: normalize(blockOld, "\n"),
           newString: normalize(blockNew, "\n"),
-          replaceAll: true,
         })
-        expect(output).toBe(normalize(blockNew + "\n" + blockNew + "\n", "\n"))
-        expectLf(output)
-      }),
-    )
-
-    it.instance("replaceAll preserves CRLF for multi-line blocks", () =>
-      Effect.gen(function* () {
-        const blockOld = "alpha\nbeta"
-        const blockNew = "alpha\nbeta-updated"
-        const content = normalize(blockOld + "\n" + blockOld + "\n", "\r\n")
-        const output = yield* apply({
-          content,
-          oldString: normalize(blockOld, "\r\n"),
-          newString: normalize(blockNew, "\r\n"),
-          replaceAll: true,
-        })
-        expect(output).toBe(normalize(blockNew + "\n" + blockNew + "\n", "\r\n"))
-        expectCrlf(output)
+        expect(error.message).toContain("Found multiple matches")
       }),
     )
   })

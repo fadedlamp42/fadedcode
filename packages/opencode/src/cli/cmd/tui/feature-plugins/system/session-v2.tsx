@@ -889,7 +889,7 @@ function Edit(props: ToolProps) {
       </Match>
       <Match when={true}>
         <InlineTool icon="←" pending="Preparing edit..." complete={filePath()} part={props.part}>
-          Edit {normalizePath(filePath())} {input({ replaceAll: props.input.replaceAll })}
+          Edit {normalizePath(filePath())}
         </InlineTool>
       </Match>
     </Switch>
