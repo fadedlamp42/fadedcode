@@ -301,6 +301,9 @@ export const Info = Schema.Struct({
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),
+      mcpProfilesPath: Schema.optional(Schema.String).annotate({
+        description: "Directory path for MCP server profile JSON files. When set, all .json files in this directory are merged and replace the mcp config at startup.",
+      }),
     }),
   ),
 }).annotate({ identifier: "Config" })
