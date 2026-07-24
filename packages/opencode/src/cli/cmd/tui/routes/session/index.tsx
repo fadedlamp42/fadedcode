@@ -146,6 +146,7 @@ const sessionBindingCommands = [
   "session.message.previous",
   "messages.copy",
   "session.copy",
+  "session.open_in_editor",
   "session.export",
   "session.child.first",
   "session.parent",
@@ -983,6 +984,38 @@ export function Session() {
           }
         } catch {
           toast.show({ message: "Failed to export session", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "Open session in $EDITOR",
+      value: "session.open_in_editor",
+      category: "Session",
+      suggested: true,
+      slash: {
+        name: "view",
+        aliases: ["editor", "vim"],
+      },
+      run: async () => {
+        try {
+          const sessionData = session()
+          if (!sessionData) return
+          const sessionMessages = messages()
+          const transcript = formatTranscript(
+            sessionData,
+            sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
+            {
+              thinking: showThinking(),
+              toolDetails: showDetails(),
+              assistantMetadata: showAssistantMetadata(),
+              providers: sync.data.provider,
+            },
+          )
+          await Editor.open({ value: transcript, renderer })
+          toast.show({ message: "Opened session in editor", variant: "success" })
+        } catch {
+          toast.show({ message: "Failed to open session in editor", variant: "error" })
         }
         dialog.clear()
       },

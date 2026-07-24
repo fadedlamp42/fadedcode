@@ -82,6 +82,7 @@ export const Definitions = {
   status_view: keybind("<leader>s", "View status"),
 
   session_export: keybind("<leader>x", "Export session to editor"),
+  session_open_in_editor: keybind("<leader>v", "Open session in $EDITOR"),
   session_copy: keybind("none", "Copy session transcript"),
   session_new: keybind("<leader>n", "Create a new session"),
   session_list: keybind("<leader>l", "List all sessions"),
@@ -279,6 +280,7 @@ export const CommandMap = {
   scrollbar_toggle: "session.toggle.scrollbar",
   status_view: "opencode.status",
   session_export: "session.export",
+  session_open_in_editor: "session.open_in_editor",
   session_copy: "session.copy",
   session_new: "session.new",
   session_list: "session.list",
