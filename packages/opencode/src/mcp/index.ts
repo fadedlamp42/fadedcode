@@ -13,6 +13,7 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
+import { ConfigVariable } from "@/config/variable"
 import { ConfigMCP } from "../config/mcp"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -94,14 +95,18 @@ function transformProfileServer(config: Record<string, any>): Record<string, any
   return result
 }
 
-function loadMcpProfiles(profilesPath: string): Record<string, any> {
+async function loadMcpProfiles(profilesPath: string): Promise<Record<string, any>> {
   const merged: Record<string, any> = {}
   try {
     const entries = Fs.readdirSync(profilesPath)
     for (const entry of entries.sort()) {
       if (!entry.endsWith(".json") || entry.startsWith(".")) continue
       const filePath = Path.join(profilesPath, entry)
-      const data = JSON.parse(Fs.readFileSync(filePath, "utf-8"))
+      const rawText = Fs.readFileSync(filePath, "utf-8")
+      // resolve {env:VAR} references (e.g. {env:HOME}) before parsing so profile
+      // files stay portable across machines instead of hardcoding absolute paths
+      const expandedText = await ConfigVariable.substitute({ type: "path", path: filePath, text: rawText })
+      const data = JSON.parse(expandedText)
       // some files wrap servers in mcpServers, some are flat
       const servers = "mcpServers" in data ? data.mcpServers : data
       for (const [key, config] of Object.entries(servers)) {
@@ -637,7 +642,7 @@ export const layer = Layer.effect(
         const bridge = yield* EffectBridge.make()
         const profilesPath = cfg.experimental?.mcpProfilesPath
         const config = profilesPath
-          ? loadMcpProfiles(profilesPath)
+          ? yield* Effect.promise(() => loadMcpProfiles(profilesPath))
           : (cfg.mcp ?? {})
         const s: State = {
           status: {},
