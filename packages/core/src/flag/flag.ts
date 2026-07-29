@@ -22,6 +22,9 @@ export const Flag = {
   OPENCODE_DISABLE_TERMINAL_TITLE: truthy("OPENCODE_DISABLE_TERMINAL_TITLE"),
   OPENCODE_SHOW_TTFD: truthy("OPENCODE_SHOW_TTFD"),
   OPENCODE_DISABLE_AUTOCOMPACT: truthy("OPENCODE_DISABLE_AUTOCOMPACT"),
+  // Drops every MCP server from the resolved config. Intended for short-lived child invocations
+  // (commit message generation, scripted `opencode run`) that should not pay MCP startup cost.
+  OPENCODE_DISABLE_MCP: truthy("OPENCODE_DISABLE_MCP"),
   OPENCODE_DISABLE_MODELS_FETCH: truthy("OPENCODE_DISABLE_MODELS_FETCH"),
   OPENCODE_DISABLE_MOUSE: truthy("OPENCODE_DISABLE_MOUSE"),
   OPENCODE_FAKE_VCS: process.env["OPENCODE_FAKE_VCS"],

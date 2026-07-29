@@ -302,7 +302,8 @@ export const Info = Schema.Struct({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),
       mcpProfilesPath: Schema.optional(Schema.String).annotate({
-        description: "Directory path for MCP server profile JSON files. When set, all .json files in this directory are merged and replace the mcp config at startup.",
+        description:
+          "Directory of MCP server profile JSON files. Every server found becomes a candidate in the `mcp` config, enabled only if named by an `MCP_SERVERS` file in the working directory or one of its ancestors. Matching `mcp` entries stay in effect as overrides.",
       }),
     }),
   ),
@@ -734,6 +735,24 @@ export const layer = Layer.effect(
             }),
           )
         }
+
+        if (result.experimental?.mcpProfilesPath && !Flag.OPENCODE_DISABLE_MCP) {
+          const catalog = yield* Effect.promise(() =>
+            ConfigMCP.loadProfiles({
+              profilesPath: result.experimental!.mcpProfilesPath!,
+              directory: ctx.directory,
+            }),
+          )
+          const servers = result.mcp ?? {}
+          for (const [name, profile] of Object.entries(catalog)) {
+            // the profile file describes the server and any same-named `mcp` entry refines it, but the
+            // MCP_SERVERS switchboard alone decides enablement so a stale `enabled` cannot resurrect a server
+            servers[name] = { ...mergeDeep(profile, servers[name] ?? {}), enabled: profile.enabled }
+          }
+          result.mcp = servers
+        }
+
+        if (Flag.OPENCODE_DISABLE_MCP) result.mcp = {}
 
         for (const [name, mode] of Object.entries(result.mode ?? {})) {
           result.agent = mergeDeep(result.agent ?? {}, {

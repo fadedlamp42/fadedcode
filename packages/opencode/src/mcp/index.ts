@@ -13,7 +13,6 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
-import { ConfigVariable } from "@/config/variable"
 import { ConfigMCP } from "../config/mcp"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -32,123 +31,9 @@ import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import * as Path from "node:path"
-import * as Fs from "node:fs"
 
 const log = Log.create({ service: "mcp" })
 
-const ALWAYS_ENABLED = new Set(["system-mcp", "exa", "mattermost-rose"])
-
-function walkMcpServersFiles(directory: string): Set<string> {
-  const enabled = new Set<string>()
-  const relative = Path.relative("/", directory)
-  if (!relative || relative.startsWith("..")) return enabled
-
-  const parts = relative.split(Path.sep)
-  for (let i = 0; i <= parts.length; i++) {
-    const ancestor = Path.join("/", ...parts.slice(0, i))
-    const filePath = Path.join(ancestor, "MCP_SERVERS")
-    try {
-      const content = Fs.readFileSync(filePath, "utf-8")
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith("#")) continue
-        if (!enabled.has(trimmed)) {
-          enabled.add(trimmed)
-        }
-      }
-    } catch {
-    }
-  }
-
-  return enabled
-}
-
-function transformProfileServer(config: Record<string, any>): Record<string, any> {
-  const result = { ...config }
-
-  if ("env" in result && !("environment" in result)) {
-    result.environment = result.env
-    delete result.env
-  }
-
-  if ("command" in result && "args" in result) {
-    result.command = [result.command, ...result.args]
-    delete result.args
-  }
-  if ("command" in result && typeof result.command === "string") {
-    result.command = [result.command]
-  }
-
-  if (!result.type) {
-    if ("url" in result) {
-      result.type = "remote"
-    } else if ("command" in result) {
-      result.type = "local"
-    }
-  } else if (result.type === "stdio") {
-    result.type = "local"
-  } else if (result.type === "sse" || result.type === "http") {
-    result.type = "remote"
-  }
-
-  return result
-}
-
-async function loadMcpProfiles(profilesPath: string): Promise<Record<string, any>> {
-  const merged: Record<string, any> = {}
-  try {
-    const entries = Fs.readdirSync(profilesPath)
-    for (const entry of entries.sort()) {
-      if (!entry.endsWith(".json") || entry.startsWith(".")) continue
-      const filePath = Path.join(profilesPath, entry)
-      const rawText = Fs.readFileSync(filePath, "utf-8")
-      // resolve {env:VAR} references (e.g. {env:HOME}) before parsing so profile
-      // files stay portable across machines instead of hardcoding absolute paths
-      const expandedText = await ConfigVariable.substitute({ type: "path", path: filePath, text: rawText })
-      const data = JSON.parse(expandedText)
-      // some files wrap servers in mcpServers, some are flat
-      const servers = "mcpServers" in data ? data.mcpServers : data
-      for (const [key, config] of Object.entries(servers)) {
-        merged[key] = { ...transformProfileServer(config as Record<string, any>), enabled: false }
-      }
-    }
-  } catch {
-    log.error("failed to load MCP profiles", { profilesPath })
-  }
-  return merged
-}
-
-function buildStemToKeys(profilesPath: string): Map<string, Set<string>> {
-  const mapping = new Map<string, Set<string>>()
-  try {
-    const entries = Fs.readdirSync(profilesPath)
-    for (const entry of entries.sort()) {
-      if (!entry.endsWith(".json") || entry.startsWith(".")) continue
-      const stem = entry.replace(/\.json$/, "")
-      const filePath = Path.join(profilesPath, entry)
-      const data = JSON.parse(Fs.readFileSync(filePath, "utf-8"))
-      const servers = "mcpServers" in data ? data.mcpServers : data
-      mapping.set(stem, new Set(Object.keys(servers)))
-    }
-  } catch {
-    log.error("failed to build stem-to-key mapping", { profilesPath })
-  }
-  return mapping
-}
-
-function resolveMcpServers(allowed: Set<string>, stemToKeys: Map<string, Set<string>>): Set<string> {
-  const resolved = new Set<string>()
-  for (const stem of allowed) {
-    const keys = stemToKeys.get(stem)
-    if (keys) {
-      for (const key of keys) resolved.add(key)
-    } else {
-      resolved.add(stem)
-    }
-  }
-  return resolved
-}
 const DEFAULT_TIMEOUT = 30_000
 
 const TolerantListToolsResultSchema = ListToolsResultSchema.extend({
@@ -353,7 +238,6 @@ interface State {
   status: Record<string, Status>
   clients: Record<string, MCPClient>
   defs: Record<string, MCPToolDef[]>
-  config: Record<string, any>
 }
 
 export interface Interface {
@@ -640,26 +524,14 @@ export const layer = Layer.effect(
       Effect.fn("MCP.state")(function* () {
         const cfg = yield* cfgSvc.get()
         const bridge = yield* EffectBridge.make()
-        const profilesPath = cfg.experimental?.mcpProfilesPath
-        const config = profilesPath
-          ? yield* Effect.promise(() => loadMcpProfiles(profilesPath))
-          : (cfg.mcp ?? {})
         const s: State = {
           status: {},
           clients: {},
           defs: {},
-          config,
         }
 
-        const directory = yield* InstanceState.directory
-        const allowedStems = walkMcpServersFiles(directory)
-        const stemToKeys = profilesPath
-          ? buildStemToKeys(profilesPath)
-          : new Map()
-        const enabledByConvention = resolveMcpServers(allowedStems, stemToKeys)
-
         yield* Effect.forEach(
-          Object.entries(config),
+          Object.entries(cfg.mcp ?? {}),
           ([key, mcp]) =>
             Effect.gen(function* () {
               if (!isMcpConfigured(mcp)) {
@@ -667,17 +539,12 @@ export const layer = Layer.effect(
                 return
               }
 
-              if (mcp.enabled === false && !enabledByConvention.has(key) && !ALWAYS_ENABLED.has(key)) {
+              if (mcp.enabled === false) {
                 s.status[key] = { status: "disabled" }
                 return
               }
 
-              const mcpResolved =
-                enabledByConvention.has(key) || ALWAYS_ENABLED.has(key)
-                  ? { ...mcp, enabled: true }
-                  : mcp
-
-              const result = yield* create(key, mcpResolved).pipe(Effect.catch(() => Effect.void))
+              const result = yield* create(key, mcp).pipe(Effect.catch(() => Effect.void))
               if (!result) return
 
               s.status[key] = result.status
@@ -742,9 +609,10 @@ export const layer = Layer.effect(
 
     const status = Effect.fn("MCP.status")(function* () {
       const s = yield* InstanceState.get(state)
+      const cfg = yield* cfgSvc.get()
       const result: Record<string, Status> = {}
 
-      for (const [key, mcp] of Object.entries(s.config)) {
+      for (const [key, mcp] of Object.entries(cfg.mcp ?? {})) {
         if (!isMcpConfigured(mcp)) continue
         result[key] = s.status[key] ?? { status: "disabled" }
       }
@@ -805,7 +673,7 @@ export const layer = Layer.effect(
         connectedClients,
         ([clientName, client]) =>
           Effect.gen(function* () {
-            const mcpConfig = s.config[clientName]
+            const mcpConfig = cfg.mcp?.[clientName]
             const entry = mcpConfig && isMcpConfigured(mcpConfig) ? mcpConfig : undefined
 
             const listed = s.defs[clientName]
