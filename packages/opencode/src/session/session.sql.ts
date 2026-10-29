@@ -4,6 +4,7 @@ import type { MessageV2 } from "./message-v2"
 import type { SessionMessage } from "@opencode-ai/core/session-message"
 import type { Snapshot } from "../snapshot"
 import type { Permission } from "../permission"
+import type { ConfigMCP } from "../config/mcp"
 import type { ProjectID } from "../project/schema"
 import type { SessionID, MessageID, PartID } from "./schema"
 import type { WorkspaceID } from "../control-plane/schema"
@@ -41,6 +42,7 @@ export const SessionTable = sqliteTable(
     tokens_cache_write: integer().notNull().default(0),
     revert: text({ mode: "json" }).$type<{ messageID: MessageID; partID?: PartID; snapshot?: string; diff?: string }>(),
     permission: text({ mode: "json" }).$type<Permission.Ruleset>(),
+    mcp_exposure: text({ mode: "json" }).$type<ConfigMCP.Exposure>(),
     agent: text(),
     model: text({ mode: "json" }).$type<{
       id: string

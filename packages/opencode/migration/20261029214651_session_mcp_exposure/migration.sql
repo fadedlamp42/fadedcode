@@ -1,0 +1,1 @@
+ALTER TABLE `session` ADD `mcp_exposure` text;

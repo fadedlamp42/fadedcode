@@ -36,6 +36,7 @@ import { ModelID, ProviderID } from "@/provider/schema"
 
 import type { Provider } from "@/provider/provider"
 import { Permission } from "@/permission"
+import { ConfigMCP } from "@/config/mcp"
 import { Global } from "@opencode-ai/core/global"
 import { Effect, Layer, Option, Context, Schema, Types } from "effect"
 import { NonNegativeInt, optionalOmitUndefined } from "@opencode-ai/core/schema"
@@ -102,6 +103,7 @@ export function fromRow(row: SessionRow): Info {
     share,
     revert,
     permission: row.permission ? [...row.permission] : undefined,
+    mcpExposure: row.mcp_exposure ? { ...row.mcp_exposure } : undefined,
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -137,6 +139,7 @@ export function toRow(info: Info) {
     tokens_cache_write: (info.tokens ?? EmptyTokens).cache.write,
     revert: info.revert ?? null,
     permission: info.permission,
+    mcp_exposure: info.mcpExposure,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
@@ -223,6 +226,7 @@ export const Info = Schema.Struct({
   version: Schema.String,
   time: Time,
   permission: optionalOmitUndefined(Permission.Ruleset),
+  mcpExposure: optionalOmitUndefined(ConfigMCP.Exposure),
   revert: optionalOmitUndefined(Revert),
 }).annotate({ identifier: "Session" })
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
@@ -247,6 +251,7 @@ export const CreateInput = Schema.optional(
     agent: Schema.optional(Schema.String),
     model: Schema.optional(Model),
     permission: Schema.optional(Permission.Ruleset),
+    mcpExposure: Schema.optional(ConfigMCP.Exposure),
     workspaceID: Schema.optional(WorkspaceID),
   }),
 )
@@ -267,6 +272,10 @@ export const SetArchivedInput = Schema.Struct({
 export const SetPermissionInput = Schema.Struct({
   sessionID: SessionID,
   permission: Permission.Ruleset,
+})
+export const SetMcpExposureInput = Schema.Struct({
+  sessionID: SessionID,
+  mcpExposure: ConfigMCP.Exposure,
 })
 export const SetRevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -322,6 +331,7 @@ const UpdatedInfo = Schema.Struct({
   version: Schema.optional(Schema.NullOr(Schema.String)),
   time: Schema.optional(UpdatedTime),
   permission: Schema.optional(Schema.NullOr(Permission.Ruleset)),
+  mcpExposure: Schema.optional(Schema.NullOr(ConfigMCP.Exposure)),
   revert: Schema.optional(Schema.NullOr(Revert)),
 })
 
@@ -456,6 +466,7 @@ export interface Interface {
     agent?: string
     model?: Schema.Schema.Type<typeof Model>
     permission?: Permission.Ruleset
+    mcpExposure?: ConfigMCP.Exposure
     workspaceID?: WorkspaceID
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
@@ -464,6 +475,7 @@ export interface Interface {
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: Permission.Ruleset }) => Effect.Effect<void>
+  readonly setMcpExposure: (input: { sessionID: SessionID; mcpExposure: ConfigMCP.Exposure }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
@@ -530,6 +542,7 @@ export const layer: Layer.Layer<
       directory: string
       path?: string
       permission?: Permission.Ruleset
+      mcpExposure?: ConfigMCP.Exposure
     }) {
       const ctx = yield* InstanceState.context
       const result: Info = {
@@ -545,6 +558,7 @@ export const layer: Layer.Layer<
         agent: input.agent,
         model: input.model,
         permission: input.permission ? [...input.permission] : undefined,
+        mcpExposure: input.mcpExposure ? { ...input.mcpExposure } : undefined,
         cost: 0,
         tokens: EmptyTokens,
         time: {
@@ -660,6 +674,7 @@ export const layer: Layer.Layer<
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
       permission?: Permission.Ruleset
+      mcpExposure?: ConfigMCP.Exposure
       workspaceID?: WorkspaceID
     }) {
       const ctx = yield* InstanceState.context
@@ -672,6 +687,7 @@ export const layer: Layer.Layer<
         agent: input?.agent,
         model: input?.model,
         permission: input?.permission,
+        mcpExposure: input?.mcpExposure,
         workspaceID: input?.workspaceID ?? workspace,
       })
     })
@@ -737,6 +753,13 @@ export const layer: Layer.Layer<
       permission: Permission.Ruleset
     }) {
       yield* patch(input.sessionID, { permission: [...input.permission], time: { updated: Date.now() } })
+    })
+
+    const setMcpExposure = Effect.fn("Session.setMcpExposure")(function* (input: {
+      sessionID: SessionID
+      mcpExposure: ConfigMCP.Exposure
+    }) {
+      yield* patch(input.sessionID, { mcpExposure: { ...input.mcpExposure }, time: { updated: Date.now() } })
     })
 
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
@@ -845,6 +868,7 @@ export const layer: Layer.Layer<
       setTitle,
       setArchived,
       setPermission,
+      setMcpExposure,
       setRevert,
       clearRevert,
       setSummary,

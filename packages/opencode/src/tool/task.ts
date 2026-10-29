@@ -154,6 +154,9 @@ export const TaskTool = Tool.define(
         (yield* sessions.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${next.name} subagent)`,
+          // snapshot at creation: a parent that already exposed a server hands it to the child,
+          // but later parent toggles do not propagate (decision 2026-10-29)
+          mcpExposure: parent.mcpExposure ? { ...parent.mcpExposure } : undefined,
           permission: [
             ...deriveSubagentSessionPermission({
               parentSessionPermission: parent.permission ?? [],
