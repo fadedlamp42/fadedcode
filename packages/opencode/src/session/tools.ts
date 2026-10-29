@@ -115,7 +115,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   }
 
-  for (const [key, item] of Object.entries(yield* mcp.tools())) {
+  // sessions see only pinned/shown MCP tools; `?? {}` means a fresh session starts at zero.
+  const mcpTools = yield* mcp.tools(input.session.mcpExposure ?? {})
+  for (const [key, item] of Object.entries(mcpTools)) {
     const execute = item.execute
     if (!execute) continue
 

@@ -13,6 +13,8 @@ import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
+import { McpTool } from "./mcp"
+import { MCP } from "@/mcp"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -107,6 +109,7 @@ export const layer: Layer.Layer<
   | Format.Service
   | Truncate.Service
   | RuntimeFlags.Service
+  | MCP.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -137,6 +140,8 @@ export const layer: Layer.Layer<
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const mcptool = yield* McpTool
+    const mcp = yield* MCP.Service
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -244,6 +249,7 @@ export const layer: Layer.Layer<
           repo_clone: Tool.init(repoClone),
           repo_overview: Tool.init(repoOverview),
           skill: Tool.init(skilltool),
+          mcp: Tool.init(mcptool),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -269,6 +275,7 @@ export const layer: Layer.Layer<
             tool.search,
             ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),
             tool.skill,
+            tool.mcp,
             tool.patch,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
@@ -322,6 +329,13 @@ export const layer: Layer.Layer<
       return ["Available agent types and the tools they have access to:", description].join("\n")
     })
 
+    // the mcp tool's description carries the full catalogue, so a model that has never heard of a
+    // server can still find it. built from config + advertisements only, so it stays prompt-cache
+    // stable: it changes when a profile or switchboard changes, never when a server changes tools.
+    const describeMcp = Effect.fn("ToolRegistry.describeMcp")(function* () {
+      return yield* mcp.catalogText()
+    })
+
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
       const filtered = (yield* all()).filter((tool) => {
         if (tool.id === WebSearchTool.id) {
@@ -356,6 +370,7 @@ export const layer: Layer.Layer<
               output.description,
               tool.id === TaskTool.id ? yield* describeTask(input.agent) : undefined,
               tool.id === SkillTool.id ? yield* describeSkill(input.agent) : undefined,
+              tool.id === McpTool.id ? yield* describeMcp() : undefined,
             ]
               .filter(Boolean)
               .join("\n"),
@@ -402,7 +417,7 @@ export const defaultLayer = Layer.suspend(() =>
       Layer.provide(Ripgrep.defaultLayer),
       Layer.provide(Truncate.defaultLayer),
     )
-    .pipe(Layer.provide(RuntimeFlags.defaultLayer)),
+    .pipe(Layer.provide(MCP.defaultLayer), Layer.provide(RuntimeFlags.defaultLayer)),
 )
 
 function isZodType(value: unknown): value is z.ZodType {

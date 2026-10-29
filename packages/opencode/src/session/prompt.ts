@@ -1242,11 +1242,14 @@ export const layer = Layer.effect(
         const slog = elog.with({ sessionID })
         let structured: unknown
         let step = 0
-        const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
           yield* slog.info("loop", { step })
+
+          // re-read the session every step so an `mcp` show/hide (or any other session mutation)
+          // lands on the NEXT MODEL STEP instead of waiting for the next user turn
+          const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID)
 

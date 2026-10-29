@@ -1,0 +1,16 @@
+Search and control which MCP servers' tools are exposed to this session.
+
+Sessions start with ZERO MCP tools exposed. The catalogue below lists every server this directory can reach; none of their tools are in your context until you expose them. Use this tool to find and expose exactly what the task needs.
+
+Actions:
+- search: rank catalogue entries against a query. Matches server names, hand-written advertisements, facets, and tool names/descriptions. Returns ready-made `show` targets.
+- show: expose servers, facets, or tools for this session. Targets: "server" (every tool), "server:prefix" (tools whose raw name starts with prefix; facet names and exact tool names both work). Tools arrive on your next step, in this same turn.
+- hide: remove exposure. "server" hides the whole server; "server:prefix" removes just that prefix from a previous show.
+- list: what this session currently exposes, with tool counts and estimated token cost.
+
+Notes:
+- Each show/hide changes the tools array and therefore rewrites the prompt cache for the conversation; expose deliberately (what the task needs), not per-turn.
+- Exposure persists on the session, surviving compaction. Subagents inherit a snapshot at creation.
+- A server listed as failed/disabled is still searchable; show will expose it once it connects.
+
+Catalogue of available servers (name [status, tool count]: what it is for):
