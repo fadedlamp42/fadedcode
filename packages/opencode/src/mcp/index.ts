@@ -14,6 +14,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
 import { ConfigMCP } from "../config/mcp"
+import { McpExposure } from "./exposure"
+import { McpSearch } from "./search"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -114,6 +116,12 @@ function isMcpConfigured(entry: McpEntry): entry is ConfigMCP.Info {
 }
 
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
+
+/** `initialize.instructions`, guarded: mock clients and older SDKs may not implement the getter. */
+function instructionsOf(client: MCPClient) {
+  if (typeof client.getInstructions !== "function") return undefined
+  return client.getInstructions()
+}
 
 function remoteURL(key: string, value: string) {
   if (URL.canParse(value)) return new URL(value)
@@ -224,6 +232,7 @@ interface CreateResult {
   mcpClient?: MCPClient
   status: Status
   defs?: MCPToolDef[]
+  instructions?: string
 }
 
 interface AuthResult {
@@ -238,12 +247,25 @@ interface State {
   status: Record<string, Status>
   clients: Record<string, MCPClient>
   defs: Record<string, MCPToolDef[]>
+  /** `initialize.instructions` per server, kept for the advertisement fallback chain. */
+  instructions: Record<string, string>
 }
 
 export interface Interface {
   readonly status: () => Effect.Effect<Record<string, Status>>
   readonly clients: () => Effect.Effect<Record<string, MCPClient>>
-  readonly tools: () => Effect.Effect<Record<string, Tool>>
+  /**
+   * AI-SDK tools for the request. With no argument every connected server's tools return
+   * (non-session surfaces). With a session exposure map, only pinned/shown tools return —
+   * an empty map means zero MCP tools, the session default.
+   */
+  readonly tools: (exposure?: ConfigMCP.Exposure) => Effect.Effect<Record<string, Tool>>
+  /** the full per-server catalogue the `mcp` tool searches and prints. */
+  readonly catalog: (exposure?: ConfigMCP.Exposure) => Effect.Effect<McpSearch.CatalogEntry[]>
+  /** compact always-present catalogue text for the `mcp` tool description; cache-stable. */
+  readonly catalogText: () => Effect.Effect<string>
+  /** session-start exposure from switchboard pins. */
+  readonly pins: () => Effect.Effect<ConfigMCP.Exposure>
   readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
   readonly resources: () => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
   readonly add: (name: string, mcp: ConfigMCP.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
@@ -478,7 +500,7 @@ export const layer = Layer.effect(
       }
 
       log.info("create() successfully created client", { key, toolCount: listed.length })
-      return { mcpClient, status, defs: listed } satisfies CreateResult
+      return { mcpClient, status, defs: listed, instructions: instructionsOf(mcpClient) } satisfies CreateResult
     })
     const cfgSvc = yield* Config.Service
 
@@ -528,6 +550,7 @@ export const layer = Layer.effect(
           status: {},
           clients: {},
           defs: {},
+          instructions: {},
         }
 
         yield* Effect.forEach(
@@ -551,7 +574,21 @@ export const layer = Layer.effect(
               if (result.mcpClient) {
                 s.clients[key] = result.mcpClient
                 s.defs[key] = result.defs!
+                if (result.instructions) s.instructions[key] = result.instructions
                 watch(s, key, result.mcpClient, bridge, mcp.timeout)
+                // a catalogued server with neither an advertisement nor instructions is an opaque
+                // name in search; say so at startup instead of letting it quietly join the catalogue
+                if (!mcp.advertisement && !result.instructions) {
+                  log.warn(
+                    "mcp server has no advertisement and no instructions; catalogue falls back to tool-name verbs",
+                    { key },
+                  )
+                }
+                if (!mcp.advertisement && result.instructions) {
+                  log.warn("mcp server has no advertisement; catalogue falls back to server-written instructions", {
+                    key,
+                  })
+                }
               }
             }),
           { concurrency: "unbounded" },
@@ -603,6 +640,8 @@ export const layer = Layer.effect(
       s.status[name] = { status: "connected" }
       s.clients[name] = client
       s.defs[name] = listed
+      const instructions = instructionsOf(client)
+      if (instructions) s.instructions[name] = instructions
       watch(s, name, client, bridge, timeout)
       return s.status[name]
     })
@@ -658,12 +697,30 @@ export const layer = Layer.effect(
       s.status[name] = { status: "disabled" }
     })
 
-    const tools = Effect.fn("MCP.tools")(function* () {
+    const configuredServers = Effect.fnUntraced(function* () {
+      const cfg = yield* cfgSvc.get()
+      const result: Record<string, ConfigMCP.Info> = {}
+      for (const [key, mcp] of Object.entries(cfg.mcp ?? {})) {
+        if (isMcpConfigured(mcp)) result[key] = mcp
+      }
+      return result
+    })
+
+    const pinsFn = Effect.fn("MCP.pins")(function* () {
+      return McpExposure.pins(yield* configuredServers())
+    })
+
+    const tools = Effect.fn("MCP.tools")(function* (exposure?: ConfigMCP.Exposure) {
       const result: Record<string, Tool> = {}
       const s = yield* InstanceState.get(state)
 
       const cfg = yield* cfgSvc.get()
       const defaultTimeout = cfg.experimental?.mcp_timeout
+
+      // undefined = every connected server's tools (non-session surfaces). a map, even an empty
+      // one, means a session view: only switchboard pins plus the session's own shows get through.
+      const effective = exposure === undefined ? undefined : McpExposure.effective(yield* pinsFn(), exposure)
+      const exposedDefs: MCPToolDef[] = []
 
       const connectedClients = Object.entries(s.clients).filter(
         ([clientName]) => s.status[clientName]?.status === "connected",
@@ -684,12 +741,74 @@ export const layer = Layer.effect(
 
             const timeout = entry?.timeout ?? defaultTimeout
             for (const mcpTool of listed) {
+              if (effective !== undefined && !McpExposure.exposesTool(effective[clientName], mcpTool.name)) continue
               result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              exposedDefs.push(mcpTool)
             }
           }),
         { concurrency: "unbounded" },
       )
+
+      // size telemetry beside the existing toolCount logs: a future first-turn context jump
+      // should be explainable from the log alone. measured from the raw definitions, estimated /4.
+      if (effective !== undefined) {
+        log.info("session mcp exposure", {
+          toolCount: exposedDefs.length,
+          estTokens: Math.round(JSON.stringify(exposedDefs).length / 4),
+          servers: Object.keys(effective).filter((name) => effective[name] !== "none"),
+        })
+      }
       return result
+    })
+
+    /** rough token cost of a server's tool definitions: serialized length / 4, an estimate. */
+    function estimateTokens(defsForServer: MCPToolDef[] | undefined) {
+      if (!defsForServer) return 0
+      return Math.round(JSON.stringify(defsForServer).length / 4)
+    }
+
+    const catalog = Effect.fn("MCP.catalog")(function* (exposure?: ConfigMCP.Exposure) {
+      const s = yield* InstanceState.get(state)
+      const servers = yield* configuredServers()
+      const effective = McpExposure.effective(yield* pinsFn(), exposure)
+
+      const entries: McpSearch.CatalogEntry[] = []
+      for (const [key, mcp] of Object.entries(servers)) {
+        const defsForServer = s.defs[key]
+        const toolNames = (defsForServer ?? []).map((tool) => tool.name)
+        const resolved = McpExposure.resolveAdvertisement({
+          name: key,
+          advertisement: mcp.advertisement,
+          instructions: s.instructions[key],
+          toolNames,
+        })
+        entries.push({
+          name: key,
+          status: (s.status[key] ?? { status: mcp.enabled === false ? "disabled" : "failed" }).status,
+          pinned: mcp.pinned,
+          exposure: effective[key],
+          summary: resolved.summary,
+          advertisementSource: resolved.source,
+          facets: resolved.facets,
+          toolCount: toolNames.length,
+          estimatedTokens: estimateTokens(defsForServer),
+          tools: (defsForServer ?? []).map((tool) => ({ name: tool.name, description: tool.description ?? "" })),
+        })
+      }
+      return entries
+    })
+
+    const catalogText = Effect.fn("MCP.catalogText")(function* () {
+      const entries = yield* catalog()
+      const lines: string[] = []
+      for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
+        const summaryLine = entry.summary.split("\n")[0]
+        lines.push(`- ${entry.name} [${entry.status}, ${entry.toolCount} tools]: ${summaryLine}`)
+        for (const [prefix, description] of Object.entries(entry.facets)) {
+          lines.push(`  - ${entry.name}:${prefix} (facet): ${description}`)
+        }
+      }
+      return lines.join("\n")
     })
 
     function collectFromConnected<T extends { name: string }>(
@@ -935,6 +1054,9 @@ export const layer = Layer.effect(
       status,
       clients,
       tools,
+      catalog,
+      catalogText,
+      pins: pinsFn,
       prompts,
       resources,
       add,
