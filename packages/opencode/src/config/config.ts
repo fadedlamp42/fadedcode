@@ -746,8 +746,13 @@ export const layer = Layer.effect(
           const servers = result.mcp ?? {}
           for (const [name, profile] of Object.entries(catalog)) {
             // the profile file describes the server and any same-named `mcp` entry refines it, but the
-            // MCP_SERVERS switchboard alone decides enablement so a stale `enabled` cannot resurrect a server
-            servers[name] = { ...mergeDeep(profile, servers[name] ?? {}), enabled: profile.enabled }
+            // MCP_SERVERS switchboard alone decides enablement and pinning so a stale `enabled` cannot
+            // resurrect a server and a removed `!` marker cannot leave a ghost pin behind
+            servers[name] = {
+              ...mergeDeep(profile, servers[name] ?? {}),
+              enabled: profile.enabled,
+              pinned: profile.pinned,
+            }
           }
           result.mcp = servers
         }

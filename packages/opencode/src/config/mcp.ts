@@ -8,6 +8,52 @@ import * as Path from "node:path"
 
 const log = Log.create({ service: "config.mcp" })
 
+/**
+ * Hand-written, human-curated description of what a server is for. Search ranking leans on this
+ * text rather than on tool descriptions a remote server could change (tool-poisoning concern), and
+ * the always-present catalogue prints it so opaque names like `plain` stay discoverable.
+ *
+ * The structured form exists for grab-bag servers: `facets` maps a raw tool-name prefix (use `|`
+ * for alternatives, e.g. `"adb_|input_"`) to a one-line description. A facet is both a search
+ * target and an exposure unit (`show("system-mcp:linear_")`).
+ */
+export const AdvertisementFacets = Schema.Struct({
+  summary: Schema.String.annotate({ description: "One-line semantic description of what the server is for" }),
+  facets: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({
+    description: "Tool-name prefix (alternatives separated by |) to one-line description",
+  }),
+}).annotate({ identifier: "McpAdvertisementFacets" })
+
+export const Advertisement = Schema.Union([Schema.String, AdvertisementFacets]).annotate({
+  identifier: "McpAdvertisement",
+})
+export type Advertisement = Schema.Schema.Type<typeof Advertisement>
+
+/**
+ * Session-start exposure, resolved from `!` markers in MCP_SERVERS switchboard files. `true`
+ * exposes the whole server; a string array exposes only tools matching those facet prefixes.
+ * Absent means catalogued-but-hidden, which is the default for everything.
+ */
+export const Pinned = Schema.Union([Schema.Boolean, Schema.mutable(Schema.Array(Schema.String))]).annotate({
+  identifier: "McpPinned",
+})
+export type Pinned = Schema.Schema.Type<typeof Pinned>
+
+/**
+ * Per-session MCP exposure overrides, keyed by server name. "all" exposes every tool, "none"
+ * hides the server (even when pinned), and a string array exposes tools whose raw name equals or
+ * starts with one of the entries (facet prefixes and exact tool names share prefix semantics).
+ */
+export const ExposureEntry = Schema.Union([
+  Schema.Literal("all"),
+  Schema.Literal("none"),
+  Schema.mutable(Schema.Array(Schema.String)),
+]).annotate({ identifier: "McpExposureEntry" })
+export type ExposureEntry = Schema.Schema.Type<typeof ExposureEntry>
+
+export const Exposure = Schema.Record(Schema.String, ExposureEntry).annotate({ identifier: "McpExposure" })
+export type Exposure = { [server: string]: ExposureEntry }
+
 export const Local = Schema.Struct({
   type: Schema.Literal("local").annotate({ description: "Type of MCP server connection" }),
   command: Schema.mutable(Schema.Array(Schema.String)).annotate({
@@ -18,6 +64,12 @@ export const Local = Schema.Struct({
   }),
   enabled: Schema.optional(Schema.Boolean).annotate({
     description: "Enable or disable the MCP server on startup",
+  }),
+  advertisement: Schema.optional(Advertisement).annotate({
+    description: "Human-curated description used by the MCP catalogue and exposure search",
+  }),
+  pinned: Schema.optional(Pinned).annotate({
+    description: "Expose this server (or the named facet prefixes) at session start",
   }),
   timeout: Schema.optional(PositiveInt).annotate({
     description: "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
@@ -55,6 +107,12 @@ export const Remote = Schema.Struct({
   oauth: Schema.optional(Schema.Union([OAuth, Schema.Literal(false)])).annotate({
     description: "OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.",
   }),
+  advertisement: Schema.optional(Advertisement).annotate({
+    description: "Human-curated description used by the MCP catalogue and exposure search",
+  }),
+  pinned: Schema.optional(Pinned).annotate({
+    description: "Expose this server (or the named facet prefixes) at session start",
+  }),
   timeout: Schema.optional(PositiveInt).annotate({
     description: "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
   }),
@@ -89,15 +147,32 @@ export async function loadProfiles(input: { profilesPath: string; directory: str
   const switchedOn = await readSwitchboard(input.directory)
 
   // a switchboard line names either a profile file stem (turning on every server that file declares)
-  // or a single server, so that grouped servers can be toggled as one unit
+  // or a single server, so that grouped servers can be toggled as one unit. listing a server makes
+  // it catalogued (connected + searchable) but exposes nothing: sessions start with zero MCP tools.
+  // a `!` pin is the one exception, resolved here into the entry's `pinned` field.
   const enabled = new Set<string>()
-  for (const token of switchedOn) {
-    for (const name of catalog.stems.get(token) ?? [token]) enabled.add(name)
+  const pins = new Map<string, Pinned>()
+  for (const [token, pin] of switchedOn) {
+    for (const name of catalog.stems.get(token) ?? [token]) {
+      enabled.add(name)
+      if (pin !== false) pins.set(name, mergePins(pins.get(name), pin))
+    }
   }
 
   return Object.fromEntries(
-    Object.entries(catalog.servers).map(([name, server]) => [name, { ...server, enabled: enabled.has(name) }]),
+    Object.entries(catalog.servers).map(([name, server]) => [
+      name,
+      { ...server, enabled: enabled.has(name), ...(pins.has(name) ? { pinned: pins.get(name) } : {}) },
+    ]),
   ) satisfies Record<string, Info>
+}
+
+/** two pins for the same server combine: a whole-server pin absorbs facet pins, facet lists union. */
+function mergePins(existing: Pinned | undefined, incoming: Pinned): Pinned {
+  if (existing === true || incoming === true) return true
+  if (!existing) return incoming
+  if (!incoming) return existing
+  return [...new Set([...existing, ...incoming])]
 }
 
 /**
@@ -190,9 +265,14 @@ function normalizeProfileServer(server: unknown) {
  * Collect switchboard entries from every ancestor of `directory`, root first. Blank lines and
  * `#` comments are ignored, which is what makes a switchboard file usable as a checklist of
  * available servers with most of them commented out.
+ *
+ * Line grammar: `name` catalogues the server, `!name` additionally pins it (exposed at session
+ * start), `!name:prefix` pins just the tools matching that facet prefix. When the same token
+ * appears in more than one ancestor file, the deepest file's pin state wins outright, so a
+ * project can un-pin something a parent directory pins. Within one file, facet pins union.
  */
 async function readSwitchboard(directory: string) {
-  const tokens = new Set<string>()
+  const tokens = new Map<string, false | Pinned>()
   const relative = Path.relative("/", directory)
   if (!relative || relative.startsWith("..")) return tokens
 
@@ -202,14 +282,32 @@ async function readSwitchboard(directory: string) {
     const content = await Fs.readFile(filePath, "utf-8").catch(() => undefined)
     if (content === undefined) continue
 
+    const fileTokens = new Map<string, false | Pinned>()
     for (const line of content.split("\n")) {
       const trimmed = line.trim()
       if (!trimmed || trimmed.startsWith("#")) continue
-      tokens.add(trimmed)
+      const parsed = parseSwitchboardLine(trimmed)
+      const existing = fileTokens.get(parsed.token)
+      fileTokens.set(
+        parsed.token,
+        existing === undefined || existing === false
+          ? parsed.pin
+          : mergePins(existing, parsed.pin === false ? [] : parsed.pin),
+      )
     }
+    // deeper file wins per token: overwrite rather than merge across files
+    for (const [token, pin] of fileTokens) tokens.set(token, pin)
   }
 
   return tokens
+}
+
+function parseSwitchboardLine(line: string): { token: string; pin: false | Pinned } {
+  if (!line.startsWith("!")) return { token: line, pin: false }
+  const body = line.slice(1)
+  const colon = body.indexOf(":")
+  if (colon === -1) return { token: body, pin: true }
+  return { token: body.slice(0, colon), pin: [body.slice(colon + 1)] }
 }
 
 export * as ConfigMCP from "./mcp"
