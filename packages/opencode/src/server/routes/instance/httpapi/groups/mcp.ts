@@ -13,6 +13,14 @@ export const AddPayload = Schema.Struct({
   config: ConfigMCP.Info,
 })
 
+export const ExposurePayload = Schema.Struct({
+  sessionID: Schema.String,
+  targets: Schema.mutable(Schema.Array(Schema.String)).annotate({
+    description: 'entries like "betterstack" or "system-mcp:linear_"',
+  }),
+  exposed: Schema.Boolean.annotate({ description: "true to show, false to hide" }),
+})
+
 export const StatusMap = Schema.Record(Schema.String, MCP.Status)
 export const AuthStartResponse = Schema.Struct({
   authorizationUrl: Schema.String,
@@ -36,6 +44,7 @@ export const McpPaths = {
   authAuthenticate: "/mcp/:name/auth/authenticate",
   connect: "/mcp/:name/connect",
   disconnect: "/mcp/:name/disconnect",
+  exposure: "/mcp/exposure",
 } as const
 
 export const McpApi = HttpApi.make("mcp")
@@ -134,6 +143,27 @@ export const McpApi = HttpApi.make("mcp")
           OpenApi.annotations({
             identifier: "mcp.disconnect",
             description: "Disconnect an MCP server.",
+          }),
+        ),
+        HttpApiEndpoint.get("exposureGet", McpPaths.exposure, {
+          query: Schema.Struct({ ...WorkspaceRoutingQuery.fields, sessionID: Schema.String }),
+          success: described(ConfigMCP.Exposure, "Effective MCP exposure for the session (pins + overrides)"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "mcp.exposure.get",
+            summary: "Get session MCP exposure",
+            description: "Get the effective per-session MCP tool exposure (switchboard pins plus session overrides).",
+          }),
+        ),
+        HttpApiEndpoint.post("exposureSet", McpPaths.exposure, {
+          query: WorkspaceRoutingQuery,
+          payload: ExposurePayload,
+          success: described(ConfigMCP.Exposure, "The session's new exposure overrides"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "mcp.exposure.set",
+            summary: "Set session MCP exposure",
+            description: "Show or hide MCP servers, facets, or tools for one session.",
           }),
         ),
       )

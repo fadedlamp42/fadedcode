@@ -1,13 +1,17 @@
 import { MCP } from "@/mcp"
+import { McpExposure } from "@/mcp/exposure"
+import { Session } from "@/session/session"
+import { SessionID } from "@/session/schema"
 import { Effect, Schema } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { McpServerNotFoundError } from "../errors"
-import { AddPayload, AuthCallbackPayload, StatusMap, UnsupportedOAuthError } from "../groups/mcp"
+import { AddPayload, AuthCallbackPayload, ExposurePayload, StatusMap, UnsupportedOAuthError } from "../groups/mcp"
 
 export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handlers) =>
   Effect.gen(function* () {
     const mcp = yield* MCP.Service
+    const sessions = yield* Session.Service
 
     const status = Effect.fn("McpHttpApi.status")(function* () {
       return yield* mcp.status()
@@ -98,6 +102,22 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
       return true
     })
 
+    const exposureGet = Effect.fn("McpHttpApi.exposureGet")(function* (ctx: { query: { sessionID: string } }) {
+      const session = yield* sessions.get(SessionID.make(ctx.query.sessionID)).pipe(Effect.orDie)
+      return McpExposure.effective(yield* mcp.pins(), session.mcpExposure)
+    })
+
+    const exposureSet = Effect.fn("McpHttpApi.exposureSet")(function* (ctx: { payload: typeof ExposurePayload.Type }) {
+      const sessionID = SessionID.make(ctx.payload.sessionID)
+      const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      const current = { ...(session.mcpExposure ?? {}) }
+      const next = ctx.payload.exposed
+        ? McpExposure.applyShow(current, ctx.payload.targets)
+        : McpExposure.applyHide(current, ctx.payload.targets)
+      yield* sessions.setMcpExposure({ sessionID, mcpExposure: next })
+      return next
+    })
+
     return handlers
       .handle("status", status)
       .handle("add", add)
@@ -107,5 +127,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
       .handle("authRemove", authRemove)
       .handle("connect", connect)
       .handle("disconnect", disconnect)
+      .handle("exposureGet", exposureGet)
+      .handle("exposureSet", exposureSet)
   }),
 )

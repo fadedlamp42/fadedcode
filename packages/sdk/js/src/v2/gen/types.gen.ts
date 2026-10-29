@@ -744,6 +744,12 @@ export type PermissionRule = {
 
 export type PermissionRuleset = Array<PermissionRule>
 
+export type McpExposureEntry = "all" | "none" | Array<string>
+
+export type McpExposure = {
+  [key: string]: McpExposureEntry
+}
+
 export type Session = {
   id: string
   slug: string
@@ -786,6 +792,7 @@ export type Session = {
     archived?: number
   }
   permission?: PermissionRuleset
+  mcpExposure?: McpExposure
   revert?: {
     messageID: string
     partID?: string
@@ -973,6 +980,7 @@ export type PermissionConfig =
       bash?: PermissionRuleConfig
       task?: PermissionRuleConfig
       external_directory?: PermissionRuleConfig
+      todoread?: PermissionActionConfig
       todowrite?: PermissionActionConfig
       question?: PermissionActionConfig
       webfetch?: PermissionActionConfig
@@ -1116,6 +1124,20 @@ export type ProviderConfig = {
   }
 }
 
+export type McpAdvertisementFacets = {
+  /**
+   * One-line semantic description of what the server is for
+   */
+  summary: string
+  facets?: {
+    [key: string]: string
+  }
+}
+
+export type McpAdvertisement = string | McpAdvertisementFacets
+
+export type McpPinned = boolean | Array<string>
+
 export type McpLocalConfig = {
   /**
    * Type of MCP server connection
@@ -1129,6 +1151,8 @@ export type McpLocalConfig = {
     [key: string]: string
   }
   enabled?: boolean
+  advertisement?: McpAdvertisement
+  pinned?: McpPinned
   timeout?: number
 }
 
@@ -1157,6 +1181,8 @@ export type McpRemoteConfig = {
    * OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.
    */
   oauth?: McpOAuthConfig | false
+  advertisement?: McpAdvertisement
+  pinned?: McpPinned
   timeout?: number
 }
 
@@ -1312,6 +1338,7 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+    mcpProfilesPath?: string
   }
 }
 
@@ -1516,6 +1543,7 @@ export type GlobalSession = {
     archived?: number
   }
   permission?: PermissionRuleset
+  mcpExposure?: McpExposure
   revert?: {
     messageID: string
     partID?: string
@@ -2079,6 +2107,7 @@ export type SyncEventSessionUpdated = {
         archived?: number | null
       }
       permission?: PermissionRuleset | null
+      mcpExposure?: McpExposure | null
       revert?: {
         messageID: string
         partID?: string
@@ -5339,6 +5368,73 @@ export type McpDisconnectResponses = {
 
 export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
 
+export type McpExposureGetData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    sessionID: string
+  }
+  url: "/mcp/exposure"
+}
+
+export type McpExposureGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type McpExposureGetError = McpExposureGetErrors[keyof McpExposureGetErrors]
+
+export type McpExposureGetResponses = {
+  /**
+   * Effective MCP exposure for the session (pins + overrides)
+   */
+  200: McpExposure
+}
+
+export type McpExposureGetResponse = McpExposureGetResponses[keyof McpExposureGetResponses]
+
+export type McpExposureSetData = {
+  body?: {
+    sessionID: string
+    /**
+     * entries like "betterstack" or "system-mcp:linear_"
+     */
+    targets: Array<string>
+    /**
+     * true to show, false to hide
+     */
+    exposed: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/exposure"
+}
+
+export type McpExposureSetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type McpExposureSetError = McpExposureSetErrors[keyof McpExposureSetErrors]
+
+export type McpExposureSetResponses = {
+  /**
+   * The session's new exposure overrides
+   */
+  200: McpExposure
+}
+
+export type McpExposureSetResponse = McpExposureSetResponses[keyof McpExposureSetResponses]
+
 export type ProjectListData = {
   body?: never
   path?: never
@@ -6064,6 +6160,7 @@ export type SessionCreateData = {
       variant?: string
     }
     permission?: PermissionRuleset
+    mcpExposure?: McpExposure
     workspaceID?: string
   }
   path?: never

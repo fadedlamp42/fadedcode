@@ -3414,6 +3414,147 @@
         ]
       }
     },
+    "/mcp/exposure": {
+      "get": {
+        "tags": ["mcp"],
+        "operationId": "mcp.exposure.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "sessionID",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Effective MCP exposure for the session (pins + overrides)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpExposure"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Get the effective per-session MCP tool exposure (switchboard pins plus session overrides).",
+        "summary": "Get session MCP exposure",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.mcp.exposure.get({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["mcp"],
+        "operationId": "mcp.exposure.set",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session's new exposure overrides",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpExposure"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Show or hide MCP servers, facets, or tools for one session.",
+        "summary": "Set session MCP exposure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionID": {
+                    "type": "string"
+                  },
+                  "targets": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "entries like \"betterstack\" or \"system-mcp:linear_\""
+                  },
+                  "exposed": {
+                    "type": "boolean",
+                    "description": "true to show, false to hide"
+                  }
+                },
+                "required": ["sessionID", "targets", "exposed"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.mcp.exposure.set({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/project": {
       "get": {
         "tags": ["project"],
@@ -5187,6 +5328,9 @@
                   },
                   "permission": {
                     "$ref": "#/components/schemas/PermissionRuleset"
+                  },
+                  "mcpExposure": {
+                    "$ref": "#/components/schemas/McpExposure"
                   },
                   "workspaceID": {
                     "type": "string",
@@ -12685,6 +12829,30 @@
           "$ref": "#/components/schemas/PermissionRule"
         }
       },
+      "McpExposureEntry": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": ["all"]
+          },
+          {
+            "type": "string",
+            "enum": ["none"]
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "McpExposure": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/McpExposureEntry"
+        }
+      },
       "Session": {
         "type": "object",
         "properties": {
@@ -12825,6 +12993,9 @@
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "mcpExposure": {
+            "$ref": "#/components/schemas/McpExposure"
           },
           "revert": {
             "type": "object",
@@ -13428,6 +13599,9 @@
               "external_directory": {
                 "$ref": "#/components/schemas/PermissionRuleConfig"
               },
+              "todoread": {
+                "$ref": "#/components/schemas/PermissionActionConfig"
+              },
               "todowrite": {
                 "$ref": "#/components/schemas/PermissionActionConfig"
               },
@@ -13768,6 +13942,46 @@
         },
         "additionalProperties": false
       },
+      "McpAdvertisementFacets": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "One-line semantic description of what the server is for"
+          },
+          "facets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["summary"],
+        "additionalProperties": false
+      },
+      "McpAdvertisement": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/McpAdvertisementFacets"
+          }
+        ]
+      },
+      "McpPinned": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
       "McpLocalConfig": {
         "type": "object",
         "properties": {
@@ -13791,6 +14005,12 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "advertisement": {
+            "$ref": "#/components/schemas/McpAdvertisement"
+          },
+          "pinned": {
+            "$ref": "#/components/schemas/McpPinned"
           },
           "timeout": {
             "type": "integer",
@@ -13855,6 +14075,12 @@
               }
             ],
             "description": "OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection."
+          },
+          "advertisement": {
+            "$ref": "#/components/schemas/McpAdvertisement"
+          },
+          "pinned": {
+            "$ref": "#/components/schemas/McpPinned"
           },
           "timeout": {
             "type": "integer",
@@ -14303,6 +14529,9 @@
               "mcp_timeout": {
                 "type": "integer",
                 "exclusiveMinimum": 0
+              },
+              "mcpProfilesPath": {
+                "type": "string"
               }
             },
             "additionalProperties": false
@@ -14897,6 +15126,9 @@
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "mcpExposure": {
+            "$ref": "#/components/schemas/McpExposure"
           },
           "revert": {
             "type": "object",
@@ -16751,6 +16983,16 @@
                     "anyOf": [
                       {
                         "$ref": "#/components/schemas/PermissionRuleset"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "mcpExposure": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpExposure"
                       },
                       {
                         "type": "null"

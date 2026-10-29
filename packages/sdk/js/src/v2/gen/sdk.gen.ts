@@ -98,6 +98,11 @@ import type {
   McpConnectResponses,
   McpDisconnectErrors,
   McpDisconnectResponses,
+  McpExposure,
+  McpExposureGetErrors,
+  McpExposureGetResponses,
+  McpExposureSetErrors,
+  McpExposureSetResponses,
   McpLocalConfig,
   McpRemoteConfig,
   McpStatusErrors,
@@ -2095,6 +2100,81 @@ export class Auth2 extends HeyApiClient {
   }
 }
 
+export class Exposure extends HeyApiClient {
+  /**
+   * Get session MCP exposure
+   *
+   * Get the effective per-session MCP tool exposure (switchboard pins plus session overrides).
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<McpExposureGetResponses, McpExposureGetErrors, ThrowOnError>({
+      url: "/mcp/exposure",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set session MCP exposure
+   *
+   * Show or hide MCP servers, facets, or tools for one session.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+      targets?: Array<string>
+      exposed?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "targets" },
+            { in: "body", key: "exposed" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<McpExposureSetResponses, McpExposureSetErrors, ThrowOnError>({
+      url: "/mcp/exposure",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Mcp extends HeyApiClient {
   /**
    * Get MCP status
@@ -2228,6 +2308,11 @@ export class Mcp extends HeyApiClient {
   private _auth?: Auth2
   get auth(): Auth2 {
     return (this._auth ??= new Auth2({ client: this.client }))
+  }
+
+  private _exposure?: Exposure
+  get exposure(): Exposure {
+    return (this._exposure ??= new Exposure({ client: this.client }))
   }
 }
 
@@ -3097,6 +3182,7 @@ export class Session2 extends HeyApiClient {
         variant?: string
       }
       permission?: PermissionRuleset
+      mcpExposure?: McpExposure
       workspaceID?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -3113,6 +3199,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "permission" },
+            { in: "body", key: "mcpExposure" },
             { in: "body", key: "workspaceID" },
           ],
         },

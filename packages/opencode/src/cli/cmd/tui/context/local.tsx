@@ -486,6 +486,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           await sdk.client.mcp.connect({ name })
         }
       },
+      // per-session tool exposure (pins + overrides); the everyday "turn this on" action
+      async exposure(sessionID: string) {
+        const result = await sdk.client.mcp.exposure.get({ sessionID })
+        return result.data ?? {}
+      },
+      async setExposure(sessionID: string, target: string, exposed: boolean) {
+        await sdk.client.mcp.exposure.set({ sessionID, targets: [target], exposed })
+      },
     }
 
     createEffect(() => {
