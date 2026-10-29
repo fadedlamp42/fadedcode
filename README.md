@@ -1,141 +1,60 @@
-# preface
+# fadedcode
 
-See [this thread](https://github.com/anomalyco/opencode/issues/29118#issuecomment-4531080221) for the origin of this fork and how I feel about maintaining it (as of 05/24/2026).
+A fork of [opencode](https://github.com/anomalyco/opencode) that restores and adds a few things the upstream maintainers decided against. It is a drop-in replacement: same config, same data, same TUI, plus the divergences below.
 
-Basically:
+## why this exists
+
+Upstream removed `TodoRead` from the tool registry and later shipped versions where `todowrite` silently failed to register even with explicit permission configuration ([#12680](https://github.com/anomalyco/opencode/issues/12680), [#29118](https://github.com/anomalyco/opencode/issues/29118)). The todo list is the backbone of long agent sessions here, so losing read access to it was not acceptable. From [the thread](https://github.com/anomalyco/opencode/issues/29118#issuecomment-4531080221) that started this fork (05/2026):
+
+> this is more of a "I disagree with one decision `opencode` made" than a "I passionately want to develop my own, independent agent harness".
+
+That is still the operating philosophy:
+
+- **drop-in, not a divergent product.** The fork tracks upstream and pulls occasionally, when a missing feature or performance regression is solved there.
+- **diverge only on disagreement.** Every delta below exists because the stock behavior got in the way of real sessions, not because a different design seemed nicer.
+- **PRs and issues are welcome when they relate to the fork's own divergences.** Getting this into package managers is not a goal unless people actually use it.
+
+## core differences from upstream
+
+### todo tools restored
+
+`todoread` is a first-class read-only tool again, wired through the agent, registry, permissions, ACP, and the TUI sidebar; `todowrite` reliably registers. Subagents deny `todoread` by default so todo state stays scoped unless explicitly granted.
+
+### per-session MCP tool exposure (zero by default)
+
+The biggest divergence. Upstream sends every connected MCP server's tool definitions to the model on every request; at ~40 servers / ~900 tools that made a bare "Hi" cost ~690k tokens, and any upstream server growing its catalogue silently raised the floor for every session.
+
+Here, **sessions start with zero MCP tools exposed**:
+
+- Servers still connect and their tools stay searchable, but nothing enters model context until shown.
+- A built-in `mcp` tool lets the agent `search` / `show` / `hide` / `list`. Its description carries a compact catalogue of every reachable server, built from hand-written `advertisement` fields in the server profiles (string, or `{summary, facets}` for grab-bag servers where facets are tool-name prefixes exposable on their own). Search is lexical (BM25-ish with idf, plural folding, fuzzy server names) with facet and tool hits rolling up to their server.
+- Toggles take effect on the **next model step**, so an agent can search, show, and use a server inside one turn. Exposure persists on the session row (survives compaction, restarts, and model switches); subagents inherit a snapshot at creation.
+- `MCP_SERVERS` switchboard files (one plaintext file per directory, unioned from all ancestors of the cwd) decide which servers are catalogued; a `!name` or `!name:prefix` line pins something exposed at session start, and the deepest file wins per token so a project can un-pin a parent's pin.
+- The ^p MCP dialog toggles per-session exposure with space; instance-wide connect/disconnect moved to ctrl+s. `GET/POST /mcp/exposure` exposes the same thing over the API, and per-request telemetry logs exposed tool count and estimated token cost.
+
+Measured effect: first turn in a directory with 32 servers connected dropped from ~690k tokens to ~46k.
+
+### MCP server profiles
+
+`experimental.mcpProfilesPath` points at a directory of per-server JSON profile files (the same flat or `mcpServers`-wrapped shapes other MCP clients use, so the files stay portable). `{env:VAR}` and `{file:...}` references are expanded, letting profiles avoid hardcoded paths and secrets. The `MCP_SERVERS` switchboard, not the profile, decides what is enabled, so adding a profile never changes what starts up.
+
+### edit tool: `replaceAll` removed
+
+`replaceAll` caused file corruption often enough (especially with Dart) that it is gone: stripped from the JSON schema sent to the model, and a deprecation error if passed anyway. Batch edits route through `apply_patch` instead.
+
+### TUI: open the transcript in `$EDITOR`
+
+`<leader>v` and `/view` open the current session transcript in `$EDITOR`, reusing the existing transcript formatter.
+
+## install
+
 1. `bun install`
 2. `./build.sh` to build the binary
-3. `./install.sh` (assumes you're on `darwin` and fine with a new `opencode` script in `/usr/local/bin`
+3. `./install.sh` (assumes `darwin` and that you are fine with a new `opencode` script in `/usr/local/bin`)
 4. `brew uninstall opencode` or `npm uninstall -g opencode-ai` to avoid shadowing
 
-# upstream README.md below
+The wrapper launches the built `darwin-arm64` binary with `OPENCODE_DISABLE_CHANNEL_DB=true`. On other platforms, adjust the dist path in `wrapper.sh`.
 
-<p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
-</p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+## upstream documentation
 
-<p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
-
----
-
-### Installation
-
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
-```
-
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
-
-### Desktop App (BETA)
-
-OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
-
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
-#### Installation Directory
-
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
-
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
-```
-
-### Agents
-
-OpenCode includes two built-in agents you can switch between with the `Tab` key.
-
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
-
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
-
-Learn more about [agents](https://opencode.ai/docs/agents).
-
-### Documentation
-
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
-
-### Contributing
-
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
-
-### Building on OpenCode
-
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
-
----
-
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+Everything not listed above behaves like stock opencode: [docs](https://opencode.ai/docs), [upstream repo](https://github.com/anomalyco/opencode).
