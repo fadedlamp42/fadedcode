@@ -38,6 +38,12 @@ Measured effect: first turn in a directory with 32 servers connected dropped fro
 
 `experimental.mcpProfilesPath` points at a directory of per-server JSON profile files (the same flat or `mcpServers`-wrapped shapes other MCP clients use, so the files stay portable). `{env:VAR}` and `{file:...}` references are expanded, letting profiles avoid hardcoded paths and secrets. The `MCP_SERVERS` switchboard, not the profile, decides what is enabled, so adding a profile never changes what starts up.
 
+### upstream event tap: serve-injected turns render in attached TUIs
+
+A plain `opencode` TUI hosts its server inside a Bun worker; a long-lived `opencode serve` (the pm2 app on :8397) is a separate process. Each has its own in-memory GlobalBus over one shared sqlite, so a turn injected through the serve (agent bus messages, bot-driven rounds, `prompt_async`) used to write rows an attached TUI could read but never heard about — the pane silently diverged from the transcript, permanently.
+
+`OPENCODE_EVENT_UPSTREAM=http://127.0.0.1:8397` (armed in `~/.bashrc`) makes the TUI worker tap that serve's `/global/event` SSE stream and re-emit each event onto its own bus (`src/bus/upstream.ts`). Everything downstream (render, toasts, session list) works untouched; transport heartbeats are suppressed, payload ids deduped, reconnect backs off to 15s, and a dead upstream degrades to exactly the pre-tap behavior. Opt-in by env because pointing a worker's tap at its own server would echo events. (PRI-1199, 2026-10-31.)
+
 ### edit tool: `replaceAll` removed
 
 `replaceAll` caused file corruption often enough (especially with Dart) that it is gone: stripped from the JSON schema sent to the model, and a deprecation error if passed anyway. Batch edits route through `apply_patch` instead.
