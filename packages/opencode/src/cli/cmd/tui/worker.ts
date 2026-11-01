@@ -44,6 +44,16 @@ GlobalBus.on("event", (event) => {
   Rpc.emit("global.event", event)
 })
 
+// bridge a long-lived `opencode serve` (the pm2 app on :8397) onto this
+// worker's bus, so turns injected through that serve render in the attached
+// TUI instead of silently diverging the pane from the transcript. opt-in via
+// env because pointing the tap at this worker's own server would echo events.
+const upstreamEventUrl = process.env["OPENCODE_EVENT_UPSTREAM"]
+if (upstreamEventUrl) {
+  const { startUpstreamEventTap } = await import("@/bus/upstream")
+  startUpstreamEventTap(upstreamEventUrl)
+}
+
 let server: Awaited<ReturnType<typeof Server.listen>> | undefined
 
 export const rpc = {
